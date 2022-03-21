@@ -1,30 +1,7 @@
-use crate::*;
+use crate::{glow_wrapping::WrappedGlowPainter, *};
 
 use egui::TexturesDelta;
 pub use egui::{pos2, Color32};
-
-// ----------------------------------------------------------------------------
-
-fn create_painter(canvas_id: &str) -> Result<Box<dyn Painter>, JsValue> {
-    // Glow takes precedence:
-    #[cfg(all(feature = "glow"))]
-    return Ok(Box::new(
-        crate::glow_wrapping::WrappedGlowPainter::new(canvas_id).map_err(JsValue::from)?,
-    ));
-
-    #[cfg(all(feature = "webgl", not(feature = "glow")))]
-    if let Ok(webgl2_painter) = webgl2::WebGl2Painter::new(canvas_id) {
-        tracing::debug!("Using WebGL2 backend");
-        Ok(Box::new(webgl2_painter))
-    } else {
-        tracing::debug!("Falling back to WebGL1 backend");
-        let webgl1_painter = webgl1::WebGlPainter::new(canvas_id)?;
-        Ok(Box::new(webgl1_painter))
-    }
-
-    #[cfg(all(not(feature = "webgl"), not(feature = "glow")))]
-    compile_error!("Either the 'glow' or 'webgl' feature of egui_web must be enabled!");
-}
 
 // ----------------------------------------------------------------------------
 
@@ -73,12 +50,6 @@ impl NeedRepaint {
     }
 }
 
-impl epi::backend::RepaintSignal for NeedRepaint {
-    fn request_repaint(&self) {
-        self.0.store(true, SeqCst);
-    }
-}
-
 // ----------------------------------------------------------------------------
 
 fn web_location() -> epi::Location {
@@ -95,7 +66,7 @@ fn web_location() -> epi::Location {
 
     let query_map = parse_query_map(&query)
         .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
         .collect();
 
     epi::Location {
@@ -155,7 +126,7 @@ fn test_parse_query() {
 pub struct AppRunner {
     pub(crate) frame: epi::Frame,
     egui_ctx: egui::Context,
-    painter: Box<dyn Painter>,
+    painter: WrappedGlowPainter,
     pub(crate) input: WebInput,
     app: Box<dyn epi::App>,
     pub(crate) needs_repaint: std::sync::Arc<NeedRepaint>,
@@ -168,16 +139,14 @@ pub struct AppRunner {
 }
 
 impl AppRunner {
-    pub fn new(canvas_id: &str, app: Box<dyn epi::App>) -> Result<Self, JsValue> {
-        let painter = create_painter(canvas_id)?;
+    pub fn new(canvas_id: &str, app_creator: epi::AppCreator) -> Result<Self, JsValue> {
+        let painter = WrappedGlowPainter::new(canvas_id).map_err(JsValue::from)?;
 
         let prefer_dark_mode = crate::prefer_dark_mode();
 
-        let needs_repaint: std::sync::Arc<NeedRepaint> = Default::default();
-
         let frame = epi::Frame::new(epi::backend::FrameData {
             info: epi::IntegrationInfo {
-                name: painter.name(),
+                name: "egui_web",
                 web_info: Some(epi::WebInfo {
                     location: web_location(),
                 }),
@@ -186,10 +155,19 @@ impl AppRunner {
                 native_pixels_per_point: Some(native_pixels_per_point()),
             },
             output: Default::default(),
-            repaint_signal: needs_repaint.clone(),
         });
 
+        let needs_repaint: std::sync::Arc<NeedRepaint> = Default::default();
+
         let egui_ctx = egui::Context::default();
+
+        {
+            let needs_repaint = needs_repaint.clone();
+            egui_ctx.set_request_repaint_callback(move || {
+                needs_repaint.0.store(true, SeqCst);
+            });
+        }
+
         load_memory(&egui_ctx);
         if prefer_dark_mode == Some(true) {
             egui_ctx.set_visuals(egui::Visuals::dark());
@@ -198,6 +176,13 @@ impl AppRunner {
         }
 
         let storage = LocalStorage::default();
+
+        let app = app_creator(&epi::CreationContext {
+            egui_ctx: egui_ctx.clone(),
+            integration_info: frame.info(),
+            storage: Some(&storage),
+            gl: painter.painter.gl().clone(),
+        });
 
         let mut runner = Self {
             frame,
@@ -215,12 +200,6 @@ impl AppRunner {
         };
 
         runner.input.raw.max_texture_side = Some(runner.painter.max_texture_side());
-
-        {
-            runner
-                .app
-                .setup(&runner.egui_ctx, &runner.frame, Some(&runner.storage));
-        }
 
         Ok(runner)
     }
@@ -260,7 +239,7 @@ impl AppRunner {
     /// Returns `true` if egui requests a repaint.
     ///
     /// Call [`Self::paint`] later to paint
-    pub fn logic(&mut self) -> Result<(bool, Vec<egui::ClippedMesh>), JsValue> {
+    pub fn logic(&mut self) -> Result<(bool, Vec<egui::ClippedPrimitive>), JsValue> {
         let frame_start = now_sec();
 
         resize_canvas_to_screen_size(self.canvas_id(), self.app.max_size_points());
@@ -279,7 +258,7 @@ impl AppRunner {
 
         self.handle_platform_output(platform_output);
         self.textures_delta.append(textures_delta);
-        let clipped_meshes = self.egui_ctx.tessellate(shapes);
+        let clipped_primitives = self.egui_ctx.tessellate(shapes);
 
         {
             let app_output = self.frame.take_app_output();
@@ -293,17 +272,17 @@ impl AppRunner {
         }
 
         self.frame.lock().info.cpu_usage = Some((now_sec() - frame_start) as f32);
-        Ok((needs_repaint, clipped_meshes))
+        Ok((needs_repaint, clipped_primitives))
     }
 
     /// Paint the results of the last call to [`Self::logic`].
-    pub fn paint(&mut self, clipped_meshes: Vec<egui::ClippedMesh>) -> Result<(), JsValue> {
+    pub fn paint(&mut self, clipped_primitives: &[egui::ClippedPrimitive]) -> Result<(), JsValue> {
         let textures_delta = std::mem::take(&mut self.textures_delta);
 
         self.painter.clear(self.app.clear_color());
 
         self.painter.paint_and_update_textures(
-            clipped_meshes,
+            clipped_primitives,
             self.egui_ctx.pixels_per_point(),
             &textures_delta,
         )?;
@@ -350,8 +329,8 @@ impl AppRunner {
 
 /// Install event listeners to register different input events
 /// and start running the given app.
-pub fn start(canvas_id: &str, app: Box<dyn epi::App>) -> Result<AppRunnerRef, JsValue> {
-    let mut runner = AppRunner::new(canvas_id, app)?;
+pub fn start(canvas_id: &str, app_creator: epi::AppCreator) -> Result<AppRunnerRef, JsValue> {
+    let mut runner = AppRunner::new(canvas_id, app_creator)?;
     runner.warm_up()?;
     start_runner(runner)
 }

@@ -2,49 +2,14 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-fn create_display(
-    event_loop: &glutin::event_loop::EventLoop<()>,
-) -> (
-    glutin::WindowedContext<glutin::PossiblyCurrent>,
-    glow::Context,
-) {
-    let window_builder = glutin::window::WindowBuilder::new()
-        .with_resizable(true)
-        .with_inner_size(glutin::dpi::LogicalSize {
-            width: 800.0,
-            height: 600.0,
-        })
-        .with_title("egui_glow example");
-
-    let gl_window = unsafe {
-        glutin::ContextBuilder::new()
-            .with_depth_buffer(0)
-            .with_srgb(true)
-            .with_stencil_buffer(0)
-            .with_vsync(true)
-            .build_windowed(window_builder, event_loop)
-            .unwrap()
-            .make_current()
-            .unwrap()
-    };
-
-    let gl = unsafe { glow::Context::from_loader_function(|s| gl_window.get_proc_address(s)) };
-
-    unsafe {
-        use glow::HasContext as _;
-        gl.enable(glow::FRAMEBUFFER_SRGB);
-    }
-
-    (gl_window, gl)
-}
-
 fn main() {
     let mut clear_color = [0.1, 0.1, 0.1];
 
     let event_loop = glutin::event_loop::EventLoop::with_user_event();
     let (gl_window, gl) = create_display(&event_loop);
+    let gl = std::rc::Rc::new(gl);
 
-    let mut egui_glow = egui_glow::EguiGlow::new(gl_window.window(), &gl);
+    let mut egui_glow = egui_glow::EguiGlow::new(gl_window.window(), gl.clone());
 
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
@@ -78,7 +43,7 @@ fn main() {
 
                 // draw things behind egui here
 
-                egui_glow.paint(gl_window.window(), &gl);
+                egui_glow.paint(gl_window.window());
 
                 // draw things on top of egui here
 
@@ -108,10 +73,41 @@ fn main() {
                 gl_window.window().request_redraw(); // TODO: ask egui if the events warrants a repaint instead
             }
             glutin::event::Event::LoopDestroyed => {
-                egui_glow.destroy(&gl);
+                egui_glow.destroy();
             }
 
             _ => (),
         }
     });
+}
+
+fn create_display(
+    event_loop: &glutin::event_loop::EventLoop<()>,
+) -> (
+    glutin::WindowedContext<glutin::PossiblyCurrent>,
+    glow::Context,
+) {
+    let window_builder = glutin::window::WindowBuilder::new()
+        .with_resizable(true)
+        .with_inner_size(glutin::dpi::LogicalSize {
+            width: 800.0,
+            height: 600.0,
+        })
+        .with_title("egui_glow example");
+
+    let gl_window = unsafe {
+        glutin::ContextBuilder::new()
+            .with_depth_buffer(0)
+            .with_srgb(true)
+            .with_stencil_buffer(0)
+            .with_vsync(true)
+            .build_windowed(window_builder, event_loop)
+            .unwrap()
+            .make_current()
+            .unwrap()
+    };
+
+    let gl = unsafe { glow::Context::from_loader_function(|s| gl_window.get_proc_address(s)) };
+
+    (gl_window, gl)
 }

@@ -3,29 +3,14 @@
 //! This library is an [`epi`] backend.
 //!
 //! If you are writing an app, you may want to look at [`eframe`](https://docs.rs/eframe) instead.
-//!
-//! ## Specifying the size of the egui canvas
-//! For performance reasons (on some browsers) the egui canvas does not, by default,
-//! fill the whole width of the browser.
-//! This can be changed by overriding [`epi::App::max_size_points`].
 
-// Forbid warnings in release builds:
-#![cfg_attr(not(debug_assertions), deny(warnings))]
-#![forbid(unsafe_code)]
-#![warn(clippy::all, rustdoc::missing_crate_level_docs, rust_2018_idioms)]
+#![allow(clippy::missing_errors_doc)] // So many `-> Result<_, JsValue>`
 
 pub mod backend;
-#[cfg(feature = "glow")]
 mod glow_wrapping;
 mod input;
-mod painter;
 pub mod screen_reader;
 mod text_agent;
-
-#[cfg(feature = "webgl")]
-pub mod webgl1;
-#[cfg(feature = "webgl")]
-pub mod webgl2;
 
 pub use backend::*;
 
@@ -34,7 +19,6 @@ pub use wasm_bindgen;
 pub use web_sys;
 
 use input::*;
-pub use painter::Painter;
 use web_sys::EventTarget;
 
 use std::collections::BTreeMap;
@@ -355,8 +339,8 @@ fn paint_and_schedule(runner_ref: &AppRunnerRef, panicked: Arc<AtomicBool>) -> R
     fn paint_if_needed(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
         let mut runner_lock = runner_ref.lock();
         if runner_lock.needs_repaint.fetch_and_clear() {
-            let (needs_repaint, clipped_meshes) = runner_lock.logic()?;
-            runner_lock.paint(clipped_meshes)?;
+            let (needs_repaint, clipped_primitives) = runner_lock.logic()?;
+            runner_lock.paint(&clipped_primitives)?;
             if needs_repaint {
                 runner_lock.needs_repaint.set_true();
             }
@@ -904,11 +888,11 @@ pub(crate) fn webgl1_requires_brightening(gl: &web_sys::WebGlRenderingContext) -
     !user_agent.contains("Mac OS X") && crate::is_safari_and_webkit_gtk(gl)
 }
 
-/// detecting Safari and webkitGTK.
+/// detecting Safari and `webkitGTK`.
 ///
-/// Safari and webkitGTK use unmasked renderer :Apple GPU
+/// Safari and `webkitGTK` use unmasked renderer :Apple GPU
 ///
-/// If we detect safari or webkitGTK returns true.
+/// If we detect safari or `webkitGTKs` returns true.
 ///
 /// This function used to avoid displaying linear color with `sRGB` supported systems.
 fn is_safari_and_webkit_gtk(gl: &web_sys::WebGlRenderingContext) -> bool {

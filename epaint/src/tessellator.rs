@@ -695,15 +695,17 @@ impl Tessellator {
         }
     }
 
+    /// Set the `Rect` to use for culling.
+    pub fn set_clip_rect(&mut self, clip_rect: Rect) {
+        self.clip_rect = clip_rect;
+    }
+
     /// Tessellate a single [`Shape`] into a [`Mesh`].
     ///
     /// * `tex_size`: size of the font texture (required to normalize glyph uv rectangles).
     /// * `shape`: the shape to tessellate.
     /// * `out`: triangles are appended to this.
     pub fn tessellate_shape(&mut self, tex_size: [usize; 2], shape: Shape, out: &mut Mesh) {
-        let clip_rect = self.clip_rect;
-        let options = &self.options;
-
         match shape {
             Shape::Noop => {}
             Shape::Vec(vec) => {
@@ -711,26 +713,8 @@ impl Tessellator {
                     self.tessellate_shape(tex_size, shape, out);
                 }
             }
-            Shape::Circle(CircleShape {
-                center,
-                radius,
-                fill,
-                stroke,
-            }) => {
-                if radius <= 0.0 {
-                    return;
-                }
-
-                if options.coarse_tessellation_culling
-                    && !clip_rect.expand(radius + stroke.width).contains(center)
-                {
-                    return;
-                }
-
-                self.scratchpad_path.clear();
-                self.scratchpad_path.add_circle(center, radius);
-                self.scratchpad_path.fill(fill, options, out);
-                self.scratchpad_path.stroke_closed(stroke, options, out);
+            Shape::Circle(circle) => {
+                self.tessellate_circle(circle, out);
             }
             Shape::Mesh(mesh) => {
                 if !mesh.is_valid() {
@@ -738,53 +722,300 @@ impl Tessellator {
                     return;
                 }
 
-                if options.coarse_tessellation_culling && !clip_rect.intersects(mesh.calc_bounds())
+                if self.options.coarse_tessellation_culling
+                    && !self.clip_rect.intersects(mesh.calc_bounds())
                 {
                     return;
                 }
-
                 out.append(mesh);
             }
-            Shape::LineSegment { points, stroke } => {
-                if stroke.is_empty() {
-                    return;
-                }
-
-                if options.coarse_tessellation_culling
-                    && !clip_rect
-                        .intersects(Rect::from_two_pos(points[0], points[1]).expand(stroke.width))
-                {
-                    return;
-                }
-
-                self.scratchpad_path.clear();
-                self.scratchpad_path.add_line_segment(points);
-                self.scratchpad_path.stroke_open(stroke, options, out);
-            }
+            Shape::LineSegment { points, stroke } => self.tessellate_line(points, stroke, out),
             Shape::Path(path_shape) => {
-                self.tessellate_path(path_shape, out);
+                self.tessellate_path(&path_shape, out);
             }
             Shape::Rect(rect_shape) => {
                 self.tessellate_rect(&rect_shape, out);
             }
             Shape::Text(text_shape) => {
-                if options.debug_paint_text_rects {
+                if self.options.debug_paint_text_rects {
                     let rect = text_shape.galley.rect.translate(text_shape.pos.to_vec2());
                     self.tessellate_rect(
                         &RectShape::stroke(rect.expand(0.5), 2.0, (0.5, Color32::GREEN)),
                         out,
                     );
                 }
-                self.tessellate_text(tex_size, text_shape, out);
+                self.tessellate_text(tex_size, &text_shape, out);
             }
             Shape::QuadraticBezier(quadratic_shape) => {
                 self.tessellate_quadratic_bezier(quadratic_shape, out);
             }
             Shape::CubicBezier(cubic_shape) => self.tessellate_cubic_bezier(cubic_shape, out),
+            Shape::Callback(_) => {
+                panic!("Shape::Callback passed to Tessellator");
+            }
         }
     }
 
-    pub(crate) fn tessellate_quadratic_bezier(
+    /// Tessellate a single [`CircleShape`] into a [`Mesh`].
+    ///
+    /// * `shape`: the circle to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellate_circle(&mut self, shape: CircleShape, out: &mut Mesh) {
+        let CircleShape {
+            center,
+            radius,
+            fill,
+            stroke,
+        } = shape;
+
+        if radius <= 0.0 {
+            return;
+        }
+
+        if self.options.coarse_tessellation_culling
+            && !self
+                .clip_rect
+                .expand(radius + stroke.width)
+                .contains(center)
+        {
+            return;
+        }
+
+        self.scratchpad_path.clear();
+        self.scratchpad_path.add_circle(center, radius);
+        self.scratchpad_path.fill(fill, &self.options, out);
+        self.scratchpad_path
+            .stroke_closed(stroke, &self.options, out);
+    }
+
+    /// Tessellate a single [`Mesh`] into a [`Mesh`].
+    ///
+    /// * `mesh`: the mesh to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellate_mesh(&mut self, mesh: &Mesh, out: &mut Mesh) {
+        if !mesh.is_valid() {
+            crate::epaint_assert!(false, "Invalid Mesh in Shape::Mesh");
+            return;
+        }
+
+        if self.options.coarse_tessellation_culling
+            && !self.clip_rect.intersects(mesh.calc_bounds())
+        {
+            return;
+        }
+
+        out.append_ref(mesh);
+    }
+
+    /// Tessellate a line segment between the two points with the given stoken into a [`Mesh`].
+    ///
+    /// * `shape`: the mesh to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellate_line(&mut self, points: [Pos2; 2], stroke: Stroke, out: &mut Mesh) {
+        if stroke.is_empty() {
+            return;
+        }
+
+        if self.options.coarse_tessellation_culling
+            && !self
+                .clip_rect
+                .intersects(Rect::from_two_pos(points[0], points[1]).expand(stroke.width))
+        {
+            return;
+        }
+
+        self.scratchpad_path.clear();
+        self.scratchpad_path.add_line_segment(points);
+        self.scratchpad_path.stroke_open(stroke, &self.options, out);
+    }
+
+    /// Tessellate a single [`PathShape`] into a [`Mesh`].
+    ///
+    /// * `path_shape`: the path to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellate_path(&mut self, path_shape: &PathShape, out: &mut Mesh) {
+        if path_shape.points.len() < 2 {
+            return;
+        }
+
+        if self.options.coarse_tessellation_culling
+            && !path_shape.visual_bounding_rect().intersects(self.clip_rect)
+        {
+            return;
+        }
+
+        let PathShape {
+            points,
+            closed,
+            fill,
+            stroke,
+        } = path_shape;
+
+        self.scratchpad_path.clear();
+        if *closed {
+            self.scratchpad_path.add_line_loop(points);
+        } else {
+            self.scratchpad_path.add_open_points(points);
+        }
+
+        if *fill != Color32::TRANSPARENT {
+            crate::epaint_assert!(
+                closed,
+                "You asked to fill a path that is not closed. That makes no sense."
+            );
+            self.scratchpad_path.fill(*fill, &self.options, out);
+        }
+        let typ = if *closed {
+            PathType::Closed
+        } else {
+            PathType::Open
+        };
+        self.scratchpad_path
+            .stroke(typ, *stroke, &self.options, out);
+    }
+
+    /// Tessellate a single [`Rect`] into a [`Mesh`].
+    ///
+    /// * `rect`: the rectangle to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellate_rect(&mut self, rect: &RectShape, out: &mut Mesh) {
+        let RectShape {
+            mut rect,
+            rounding,
+            fill,
+            stroke,
+        } = *rect;
+
+        if self.options.coarse_tessellation_culling
+            && !rect.expand(stroke.width).intersects(self.clip_rect)
+        {
+            return;
+        }
+        if rect.is_negative() {
+            return;
+        }
+
+        // It is common to (sometimes accidentally) create an infinitely sized rectangle.
+        // Make sure we can handle that:
+        rect.min = rect.min.at_least(pos2(-1e7, -1e7));
+        rect.max = rect.max.at_most(pos2(1e7, 1e7));
+
+        let path = &mut self.scratchpad_path;
+        path.clear();
+        path::rounded_rectangle(&mut self.scratchpad_points, rect, rounding);
+        path.add_line_loop(&self.scratchpad_points);
+        path.fill(fill, &self.options, out);
+        path.stroke_closed(stroke, &self.options, out);
+    }
+
+    /// Tessellate a single [`TextShape`] into a [`Mesh`].
+    ///
+    /// * `tex_size`: size of the font texture (required to normalize glyph uv rectangles).
+    /// * `text_shape`: the text to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellate_text(
+        &mut self,
+        tex_size: [usize; 2],
+        text_shape: &TextShape,
+        out: &mut Mesh,
+    ) {
+        let TextShape {
+            pos: galley_pos,
+            galley,
+            underline,
+            override_text_color,
+            angle,
+        } = text_shape;
+
+        if galley.is_empty() {
+            return;
+        }
+
+        out.vertices.reserve(galley.num_vertices);
+        out.indices.reserve(galley.num_indices);
+
+        // The contents of the galley is already snapped to pixel coordinates,
+        // but we need to make sure the galley ends up on the start of a physical pixel:
+        let galley_pos = pos2(
+            self.options.round_to_pixel(galley_pos.x),
+            self.options.round_to_pixel(galley_pos.y),
+        );
+
+        let uv_normalizer = vec2(1.0 / tex_size[0] as f32, 1.0 / tex_size[1] as f32);
+
+        let rotator = Rot2::from_angle(*angle);
+
+        for row in &galley.rows {
+            if row.visuals.mesh.is_empty() {
+                continue;
+            }
+
+            let mut row_rect = row.visuals.mesh_bounds;
+            if *angle != 0.0 {
+                row_rect = row_rect.rotate_bb(rotator);
+            }
+            row_rect = row_rect.translate(galley_pos.to_vec2());
+
+            if self.options.coarse_tessellation_culling && !self.clip_rect.intersects(row_rect) {
+                // culling individual lines of text is important, since a single `Shape::Text`
+                // can span hundreds of lines.
+                continue;
+            }
+
+            let index_offset = out.vertices.len() as u32;
+
+            out.indices.extend(
+                row.visuals
+                    .mesh
+                    .indices
+                    .iter()
+                    .map(|index| index + index_offset),
+            );
+
+            out.vertices.extend(
+                row.visuals
+                    .mesh
+                    .vertices
+                    .iter()
+                    .enumerate()
+                    .map(|(i, vertex)| {
+                        let Vertex { pos, uv, mut color } = *vertex;
+
+                        if let Some(override_text_color) = override_text_color {
+                            if row.visuals.glyph_vertex_range.contains(&i) {
+                                color = *override_text_color;
+                            }
+                        }
+
+                        let offset = if *angle == 0.0 {
+                            pos.to_vec2()
+                        } else {
+                            rotator * pos.to_vec2()
+                        };
+
+                        Vertex {
+                            pos: galley_pos + offset,
+                            uv: (uv.to_vec2() * uv_normalizer).to_pos2(),
+                            color,
+                        }
+                    }),
+            );
+
+            if *underline != Stroke::none() {
+                self.scratchpad_path.clear();
+                self.scratchpad_path
+                    .add_line_segment([row_rect.left_bottom(), row_rect.right_bottom()]);
+                self.scratchpad_path
+                    .stroke_open(*underline, &self.options, out);
+            }
+        }
+    }
+
+    /// Tessellate a single [`QuadraticBezierShape`] into a [`Mesh`].
+    ///
+    /// * `quadratic_shape`: the shape to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellate_quadratic_bezier(
         &mut self,
         quadratic_shape: QuadraticBezierShape,
         out: &mut Mesh,
@@ -809,11 +1040,11 @@ impl Tessellator {
         );
     }
 
-    pub(crate) fn tessellate_cubic_bezier(
-        &mut self,
-        cubic_shape: CubicBezierShape,
-        out: &mut Mesh,
-    ) {
+    /// Tessellate a single [`CubicBezierShape`] into a [`Mesh`].
+    ///
+    /// * `cubic_shape`: the shape to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellate_cubic_bezier(&mut self, cubic_shape: CubicBezierShape, out: &mut Mesh) {
         let options = &self.options;
         let clip_rect = self.clip_rect;
         if options.coarse_tessellation_culling
@@ -864,169 +1095,6 @@ impl Tessellator {
         };
         self.scratchpad_path.stroke(typ, stroke, &self.options, out);
     }
-
-    pub(crate) fn tessellate_path(&mut self, path_shape: PathShape, out: &mut Mesh) {
-        if path_shape.points.len() < 2 {
-            return;
-        }
-
-        if self.options.coarse_tessellation_culling
-            && !path_shape.visual_bounding_rect().intersects(self.clip_rect)
-        {
-            return;
-        }
-
-        let PathShape {
-            points,
-            closed,
-            fill,
-            stroke,
-        } = path_shape;
-
-        self.scratchpad_path.clear();
-        if closed {
-            self.scratchpad_path.add_line_loop(&points);
-        } else {
-            self.scratchpad_path.add_open_points(&points);
-        }
-
-        if fill != Color32::TRANSPARENT {
-            crate::epaint_assert!(
-                closed,
-                "You asked to fill a path that is not closed. That makes no sense."
-            );
-            self.scratchpad_path.fill(fill, &self.options, out);
-        }
-        let typ = if closed {
-            PathType::Closed
-        } else {
-            PathType::Open
-        };
-        self.scratchpad_path.stroke(typ, stroke, &self.options, out);
-    }
-
-    pub(crate) fn tessellate_rect(&mut self, rect: &RectShape, out: &mut Mesh) {
-        let RectShape {
-            mut rect,
-            rounding,
-            fill,
-            stroke,
-        } = *rect;
-
-        if self.options.coarse_tessellation_culling
-            && !rect.expand(stroke.width).intersects(self.clip_rect)
-        {
-            return;
-        }
-        if rect.is_negative() {
-            return;
-        }
-
-        // It is common to (sometimes accidentally) create an infinitely sized rectangle.
-        // Make sure we can handle that:
-        rect.min = rect.min.at_least(pos2(-1e7, -1e7));
-        rect.max = rect.max.at_most(pos2(1e7, 1e7));
-
-        let path = &mut self.scratchpad_path;
-        path.clear();
-        path::rounded_rectangle(&mut self.scratchpad_points, rect, rounding);
-        path.add_line_loop(&self.scratchpad_points);
-        path.fill(fill, &self.options, out);
-        path.stroke_closed(stroke, &self.options, out);
-    }
-
-    pub fn tessellate_text(&mut self, tex_size: [usize; 2], text_shape: TextShape, out: &mut Mesh) {
-        let TextShape {
-            pos: galley_pos,
-            galley,
-            underline,
-            override_text_color,
-            angle,
-        } = text_shape;
-
-        if galley.is_empty() {
-            return;
-        }
-
-        out.vertices.reserve(galley.num_vertices);
-        out.indices.reserve(galley.num_indices);
-
-        // The contents of the galley is already snapped to pixel coordinates,
-        // but we need to make sure the galley ends up on the start of a physical pixel:
-        let galley_pos = pos2(
-            self.options.round_to_pixel(galley_pos.x),
-            self.options.round_to_pixel(galley_pos.y),
-        );
-
-        let uv_normalizer = vec2(1.0 / tex_size[0] as f32, 1.0 / tex_size[1] as f32);
-
-        let rotator = Rot2::from_angle(angle);
-
-        for row in &galley.rows {
-            if row.visuals.mesh.is_empty() {
-                continue;
-            }
-
-            let mut row_rect = row.visuals.mesh_bounds;
-            if angle != 0.0 {
-                row_rect = row_rect.rotate_bb(rotator);
-            }
-            row_rect = row_rect.translate(galley_pos.to_vec2());
-
-            if self.options.coarse_tessellation_culling && !self.clip_rect.intersects(row_rect) {
-                // culling individual lines of text is important, since a single `Shape::Text`
-                // can span hundreds of lines.
-                continue;
-            }
-
-            let index_offset = out.vertices.len() as u32;
-
-            out.indices.extend(
-                row.visuals
-                    .mesh
-                    .indices
-                    .iter()
-                    .map(|index| index + index_offset),
-            );
-
-            out.vertices.extend(
-                row.visuals
-                    .mesh
-                    .vertices
-                    .iter()
-                    .enumerate()
-                    .map(|(i, vertex)| {
-                        let Vertex { pos, uv, mut color } = *vertex;
-
-                        if let Some(override_text_color) = override_text_color {
-                            if row.visuals.glyph_vertex_range.contains(&i) {
-                                color = override_text_color;
-                            }
-                        }
-
-                        let offset = if angle == 0.0 {
-                            pos.to_vec2()
-                        } else {
-                            rotator * pos.to_vec2()
-                        };
-
-                        Vertex {
-                            pos: galley_pos + offset,
-                            uv: (uv.to_vec2() * uv_normalizer).to_pos2(),
-                            color,
-                        }
-                    }),
-            );
-
-            if underline != Stroke::none() {
-                self.scratchpad_path.clear();
-                self.scratchpad_path
-                    .add_line_segment([row_rect.left_bottom(), row_rect.right_bottom()]);
-                self.scratchpad_path
-                    .stroke_open(underline, &self.options, out);
-            }
-        }
-    }
 }
 
 /// Turns [`Shape`]:s into sets of triangles.
@@ -1046,58 +1114,97 @@ pub fn tessellate_shapes(
     shapes: Vec<ClippedShape>,
     options: TessellationOptions,
     tex_size: [usize; 2],
-) -> Vec<ClippedMesh> {
+) -> Vec<ClippedPrimitive> {
     let mut tessellator = Tessellator::from_options(options);
 
-    let mut clipped_meshes: Vec<ClippedMesh> = Vec::default();
+    let mut clipped_primitives: Vec<ClippedPrimitive> = Vec::default();
 
-    for ClippedShape(clip_rect, shape) in shapes {
-        if !clip_rect.is_positive() {
+    for ClippedShape(new_clip_rect, new_shape) in shapes {
+        if !new_clip_rect.is_positive() {
             continue; // skip empty clip rectangles
         }
 
-        let start_new_mesh = match clipped_meshes.last() {
-            None => true,
-            Some(cm) => cm.0 != clip_rect || cm.1.texture_id != shape.texture_id(),
-        };
+        if let Shape::Callback(callback) = new_shape {
+            clipped_primitives.push(ClippedPrimitive {
+                clip_rect: new_clip_rect,
+                primitive: Primitive::Callback(callback),
+            });
+        } else {
+            let start_new_mesh = match clipped_primitives.last() {
+                None => true,
+                Some(output_clipped_primitive) => {
+                    output_clipped_primitive.clip_rect != new_clip_rect
+                        || if let Primitive::Mesh(output_mesh) = &output_clipped_primitive.primitive
+                        {
+                            output_mesh.texture_id != new_shape.texture_id()
+                        } else {
+                            true
+                        }
+                }
+            };
 
-        if start_new_mesh {
-            clipped_meshes.push(ClippedMesh(clip_rect, Mesh::default()));
-        }
+            if start_new_mesh {
+                clipped_primitives.push(ClippedPrimitive {
+                    clip_rect: new_clip_rect,
+                    primitive: Primitive::Mesh(Mesh::default()),
+                });
+            }
 
-        let out = &mut clipped_meshes.last_mut().unwrap().1;
-        tessellator.clip_rect = clip_rect;
-        tessellator.tessellate_shape(tex_size, shape, out);
-    }
+            let out = clipped_primitives.last_mut().unwrap();
 
-    if options.debug_paint_clip_rects {
-        for ClippedMesh(clip_rect, mesh) in &mut clipped_meshes {
-            if mesh.texture_id == TextureId::default() {
-                tessellator.clip_rect = Rect::EVERYTHING;
-                tessellator.tessellate_shape(
-                    tex_size,
-                    Shape::rect_stroke(
-                        *clip_rect,
-                        0.0,
-                        Stroke::new(2.0, Color32::from_rgb(150, 255, 150)),
-                    ),
-                    mesh,
-                );
+            if let Primitive::Mesh(out_mesh) = &mut out.primitive {
+                tessellator.clip_rect = new_clip_rect;
+                tessellator.tessellate_shape(tex_size, new_shape, out_mesh);
             } else {
-                // TODO: create a new `ClippedMesh` just for the painted clip rectangle
+                unreachable!();
             }
         }
     }
 
+    if options.debug_paint_clip_rects {
+        clipped_primitives = add_clip_rects(&mut tessellator, tex_size, clipped_primitives);
+    }
+
     if options.debug_ignore_clip_rects {
-        for ClippedMesh(clip_rect, _) in &mut clipped_meshes {
-            *clip_rect = Rect::EVERYTHING;
+        for clipped_primitive in &mut clipped_primitives {
+            clipped_primitive.clip_rect = Rect::EVERYTHING;
         }
     }
 
-    for ClippedMesh(_, mesh) in &clipped_meshes {
-        crate::epaint_assert!(mesh.is_valid(), "Tessellator generated invalid Mesh");
+    for clipped_primitive in &clipped_primitives {
+        if let Primitive::Mesh(mesh) = &clipped_primitive.primitive {
+            crate::epaint_assert!(mesh.is_valid(), "Tessellator generated invalid Mesh");
+        }
     }
 
-    clipped_meshes
+    clipped_primitives
+}
+
+fn add_clip_rects(
+    tessellator: &mut Tessellator,
+    tex_size: [usize; 2],
+    clipped_primitives: Vec<ClippedPrimitive>,
+) -> Vec<ClippedPrimitive> {
+    tessellator.clip_rect = Rect::EVERYTHING;
+    let stroke = Stroke::new(2.0, Color32::from_rgb(150, 255, 150));
+
+    clipped_primitives
+        .into_iter()
+        .flat_map(|clipped_primitive| {
+            let mut clip_rect_mesh = Mesh::default();
+            tessellator.tessellate_shape(
+                tex_size,
+                Shape::rect_stroke(clipped_primitive.clip_rect, 0.0, stroke),
+                &mut clip_rect_mesh,
+            );
+
+            [
+                clipped_primitive,
+                ClippedPrimitive {
+                    clip_rect: Rect::EVERYTHING, // whatever
+                    primitive: Primitive::Mesh(clip_rect_mesh),
+                },
+            ]
+        })
+        .collect()
 }

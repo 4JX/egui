@@ -5,8 +5,8 @@
 [![Documentation](https://docs.rs/egui/badge.svg)](https://docs.rs/egui)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 [![Build Status](https://github.com/emilk/egui/workflows/CI/badge.svg)](https://github.com/emilk/egui/actions?workflow=CI)
-![MIT](https://img.shields.io/badge/license-MIT-blue.svg)
-![Apache](https://img.shields.io/badge/license-Apache-blue.svg)
+[![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/emilk/egui/blob/master/LICENSE-MIT)
+[![Apache](https://img.shields.io/badge/license-Apache-blue.svg)](https://github.com/emilk/egui/blob/master/LICENSE-APACHE)
 [![Discord](https://img.shields.io/discord/900275882684477440?label=egui%20discord)](https://discord.gg/JFcEma9bJq)
 
 👉 [Click to run the web demo](https://www.egui.rs/#demo) 👈
@@ -160,13 +160,13 @@ An integration needs to do the following each frame:
 
 ### Official integrations
 
-If you're making an app, your best bet is using [`eframe`](https://github.com/emilk/egui/tree/master/eframe), the official egui framework. It lets you write apps that work on both the web and native. `eframe` is just a thin wrapper over `egui_web` and `egui_glium` (see below).
+If you're making an app, your best bet is using [`eframe`](https://github.com/emilk/egui/tree/master/eframe), the official egui framework. It lets you write apps that work on both the web and native. `eframe` is just a thin wrapper over `egui_web` and `egui_glow` (see below).
 
 These are the official egui integrations:
 
 * [`egui_glium`](https://github.com/emilk/egui/tree/master/egui_glium) for compiling native apps with [Glium](https://github.com/glium/glium).
-* [`egui_glow`](https://github.com/emilk/egui/tree/master/egui_glow) for compiling native apps with [Glow](https://github.com/grovesNL/glow).
-* [`egui_web`](https://github.com/emilk/egui/tree/master/egui_web) for making a web app. Compiles to WASM, renders with WebGL. [Click to run the egui demo](https://www.egui.rs/#demo).
+* [`egui_glow`](https://github.com/emilk/egui/tree/master/egui_glow) for compiling native apps with [glow](https://github.com/grovesNL/glow).
+* [`egui_web`](https://github.com/emilk/egui/tree/master/egui_web) for making a web app. Compiles to WASM, renders with WebGL. [Click to run the egui demo](https://www.egui.rs/#demo). Uses `egui_glow`.
 * [`egui-winit`](https://github.com/emilk/egui/tree/master/egui-winit) for integrating with [winit](https://github.com/rust-windowing/winit). `egui-winit` is used by `egui_glium` and `egui_glow`.
 
 ### 3rd party integrations
@@ -204,9 +204,9 @@ loop {
     let full_output = egui_ctx.run(raw_input, |egui_ctx| {
         my_app.ui(egui_ctx); // add panels, windows and widgets to `egui_ctx` here
     });
-    let clipped_meshes = egui_ctx.tessellate(full_output.shapes); // creates triangles to paint
+    let clipped_primitives = egui_ctx.tessellate(full_output.shapes); // creates triangles to paint
 
-    my_integration.paint(&full_output.textures_delta, clipped_meshes);
+    my_integration.paint(&full_output.textures_delta, clipped_primitives);
 
     let platform_output = full_output.platform_output;
     my_integration.set_cursor_icon(platform_output.cursor_icon);

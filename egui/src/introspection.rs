@@ -91,19 +91,24 @@ impl Widget for &epaint::stats::PaintStats {
                 shape_path,
                 shape_mesh,
                 shape_vec,
+                num_callbacks,
                 text_shape_vertices,
                 text_shape_indices,
-                clipped_meshes,
+                clipped_primitives,
                 vertices,
                 indices,
             } = self;
 
             ui.label("Intermediate:");
             label(ui, shapes, "shapes").on_hover_text("Boxes, circles, etc");
-            label(ui, shape_text, "text (mostly cached)");
+            ui.horizontal(|ui| {
+                label(ui, shape_text, "text");
+                ui.small("(mostly cached)");
+            });
             label(ui, shape_path, "paths");
             label(ui, shape_mesh, "nested meshes");
             label(ui, shape_vec, "nested shapes");
+            ui.label(format!("{:6} callbacks", num_callbacks));
             ui.add_space(10.0);
 
             ui.label("Text shapes:");
@@ -113,7 +118,7 @@ impl Widget for &epaint::stats::PaintStats {
             ui.add_space(10.0);
 
             ui.label("Tessellated (and culled):");
-            label(ui, clipped_meshes, "clipped_meshes")
+            label(ui, clipped_primitives, "primitives lists")
                 .on_hover_text("Number of separate clip rectangles");
             label(ui, vertices, "vertices");
             label(ui, indices, "indices").on_hover_text("Three 32-bit indices per triangles");

@@ -987,12 +987,13 @@ dependencies = [
  "egui",
  "egui-winit",
  "egui_extras",
- "egui_glium",
  "egui_glow",
  "egui_web",
  "ehttp",
  "epi",
+ "glow",
  "image",
+ "parking_lot 0.12.0",
  "poll-promise",
  "rfd",
 ]
@@ -1017,6 +1018,7 @@ dependencies = [
  "dark-light",
  "egui",
  "epi",
+ "glow",
  "instant",
  "serde",
  "tracing",
@@ -1051,6 +1053,7 @@ dependencies = [
  "poll-promise",
  "serde",
  "syntect",
+ "tracing",
  "unicode_names2",
 ]
 
@@ -1074,7 +1077,6 @@ dependencies = [
  "bytemuck",
  "egui",
  "egui-winit",
- "epi",
  "glium",
  "image",
 ]
@@ -1090,6 +1092,7 @@ dependencies = [
  "glow",
  "glutin",
  "memoffset",
+ "parking_lot 0.12.0",
  "tracing",
  "wasm-bindgen",
  "web-sys",
@@ -1219,6 +1222,7 @@ version = "0.17.0"
 dependencies = [
  "directories-next",
  "egui",
+ "glow",
  "ron",
  "serde",
  "tracing",
