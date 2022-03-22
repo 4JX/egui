@@ -7,10 +7,11 @@
 //! * [`three-d`](https://github.com/asny/three-d)
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+#![allow(unsafe_code)]
 
 use eframe::egui;
 
-use parking_lot::Mutex;
+use egui::mutex::Mutex;
 use std::sync::Arc;
 
 fn main() {
@@ -57,7 +58,7 @@ impl eframe::App for MyApp {
     }
 
     fn on_exit(&mut self, gl: &glow::Context) {
-        self.rotating_triangle.lock().destroy(gl)
+        self.rotating_triangle.lock().destroy(gl);
     }
 }
 

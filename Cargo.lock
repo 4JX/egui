@@ -993,7 +993,6 @@ dependencies = [
  "epi",
  "glow",
  "image",
- "parking_lot 0.12.0",
  "poll-promise",
  "rfd",
 ]
@@ -1063,7 +1062,6 @@ version = "0.17.0"
 dependencies = [
  "egui",
  "image",
- "parking_lot 0.12.0",
  "resvg",
  "tiny-skia",
  "usvg",
@@ -1092,7 +1090,6 @@ dependencies = [
  "glow",
  "glutin",
  "memoffset",
- "parking_lot 0.12.0",
  "tracing",
  "wasm-bindgen",
  "web-sys",
