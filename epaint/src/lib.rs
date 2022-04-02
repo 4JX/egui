@@ -28,10 +28,13 @@ pub mod util;
 pub use {
     bezier::{CubicBezierShape, QuadraticBezierShape},
     color::{Color32, Rgba},
-    image::{AlphaImage, ColorImage, ImageData, ImageDelta},
+    image::{ColorImage, FontImage, ImageData, ImageDelta},
     mesh::{Mesh, Mesh16, Vertex},
     shadow::Shadow,
-    shape::{CircleShape, PaintCallback, PathShape, RectShape, Rounding, Shape, TextShape},
+    shape::{
+        CircleShape, PaintCallback, PaintCallbackInfo, PathShape, RectShape, Rounding, Shape,
+        TextShape,
+    },
     stats::PaintStats,
     stroke::Stroke,
     tessellator::{tessellate_shapes, TessellationOptions, Tessellator},
