@@ -26,33 +26,35 @@ pub(crate) enum CellDirection {
 
 /// Positions cells in `[CellDirection]` and starts a new line on `[StripLayout::end_line]`
 pub struct StripLayout<'l> {
-    ui: &'l mut Ui,
+    pub(crate) ui: &'l mut Ui,
     direction: CellDirection,
-    rect: Rect,
+    pub(crate) rect: Rect,
     cursor: Pos2,
     max: Pos2,
     pub(crate) clip: bool,
+    cell_layout: egui::Layout,
 }
 
 impl<'l> StripLayout<'l> {
-    pub(crate) fn new(ui: &'l mut Ui, direction: CellDirection, clip: bool) -> Self {
+    pub(crate) fn new(
+        ui: &'l mut Ui,
+        direction: CellDirection,
+        clip: bool,
+        cell_layout: egui::Layout,
+    ) -> Self {
         let rect = ui.available_rect_before_wrap();
         let pos = rect.left_top();
 
         Self {
             ui,
+            direction,
             rect,
             cursor: pos,
             max: pos,
-            direction,
             clip,
+            cell_layout,
         }
     }
-
-    pub fn current_y(&self) -> f32 {
-        self.rect.top()
-    }
-
     fn cell_rect(&self, width: &CellSize, height: &CellSize) -> Rect {
         Rect {
             min: self.cursor,
@@ -121,24 +123,32 @@ impl<'l> StripLayout<'l> {
     pub fn end_line(&mut self) {
         match self.direction {
             CellDirection::Horizontal => {
-                self.cursor.y = self.max.y;
+                self.cursor.y = self.max.y + self.ui.spacing().item_spacing.y;
                 self.cursor.x = self.rect.left();
             }
             CellDirection::Vertical => {
-                self.cursor.x = self.max.x;
+                self.cursor.x = self.max.x + self.ui.spacing().item_spacing.x;
                 self.cursor.y = self.rect.top();
             }
         }
     }
 
+    /// Skip a lot of space.
+    pub(crate) fn skip_space(&mut self, delta: egui::Vec2) {
+        let before = self.cursor;
+        self.cursor += delta;
+        let rect = Rect::from_two_pos(before, self.cursor);
+        self.ui.allocate_rect(rect, Sense::hover());
+    }
+
     fn cell(&mut self, rect: Rect, add_contents: impl FnOnce(&mut Ui)) -> Rect {
-        let mut child_ui = self.ui.child_ui(rect, *self.ui.layout());
+        let mut child_ui = self.ui.child_ui(rect, self.cell_layout);
 
         if self.clip {
-            let mut clip_rect = child_ui.clip_rect();
-            clip_rect.min = clip_rect.min.max(rect.min);
-            clip_rect.max = clip_rect.max.min(rect.max);
-            child_ui.set_clip_rect(clip_rect);
+            let margin = egui::Vec2::splat(self.ui.visuals().clip_rect_margin);
+            let margin = margin.min(0.5 * self.ui.spacing().item_spacing);
+            let clip_rect = rect.expand2(margin);
+            child_ui.set_clip_rect(clip_rect.intersect(child_ui.clip_rect()));
         }
 
         add_contents(&mut child_ui);

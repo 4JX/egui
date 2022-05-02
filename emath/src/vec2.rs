@@ -223,6 +223,12 @@ impl Vec2 {
         vec2(self.x.ceil(), self.y.ceil())
     }
 
+    #[must_use]
+    #[inline]
+    pub fn abs(self) -> Self {
+        vec2(self.x.abs(), self.y.abs())
+    }
+
     /// True if all members are also finite.
     #[inline(always)]
     pub fn is_finite(self) -> bool {
@@ -245,6 +251,12 @@ impl Vec2 {
     #[inline]
     pub fn max(self, other: Self) -> Self {
         vec2(self.x.max(other.x), self.y.max(other.y))
+    }
+
+    /// The dot-product of two vectors.
+    #[inline]
+    pub fn dot(self, other: Self) -> f32 {
+        self.x * other.x + self.y * other.y
     }
 
     /// Returns the minimum of `self.x` and `self.y`.

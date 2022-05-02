@@ -1,5 +1,7 @@
 //! The different shapes that can be painted.
 
+use std::sync::Arc;
+
 use crate::{
     text::{FontId, Fonts, Galley},
     Color32, Mesh, Stroke, TextureId,
@@ -175,8 +177,18 @@ impl Shape {
     }
 
     #[inline]
-    pub fn galley(pos: Pos2, galley: crate::mutex::Arc<Galley>) -> Self {
+    pub fn galley(pos: Pos2, galley: Arc<Galley>) -> Self {
         TextShape::new(pos, galley).into()
+    }
+
+    #[inline]
+    /// The text color in the [`Galley`] will be replaced with the given color.
+    pub fn galley_with_color(pos: Pos2, galley: Arc<Galley>, text_color: Color32) -> Self {
+        TextShape {
+            override_text_color: Some(text_color),
+            ..TextShape::new(pos, galley)
+        }
+        .into()
     }
 
     pub fn mesh(mesh: Mesh) -> Self {
@@ -523,6 +535,28 @@ impl Rounding {
     pub fn is_same(&self) -> bool {
         self.nw == self.ne && self.nw == self.sw && self.nw == self.se
     }
+
+    /// Make sure each corner has a rounding of at least this.
+    #[inline]
+    pub fn at_least(&self, min: f32) -> Self {
+        Self {
+            nw: self.nw.max(min),
+            ne: self.ne.max(min),
+            sw: self.sw.max(min),
+            se: self.se.max(min),
+        }
+    }
+
+    /// Make sure each corner has a rounding of at most this.
+    #[inline]
+    pub fn at_most(&self, max: f32) -> Self {
+        Self {
+            nw: self.nw.min(max),
+            ne: self.ne.min(max),
+            sw: self.sw.min(max),
+            se: self.se.min(max),
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -535,7 +569,7 @@ pub struct TextShape {
     pub pos: Pos2,
 
     /// The layed out text, from [`Fonts::layout_job`].
-    pub galley: crate::mutex::Arc<Galley>,
+    pub galley: Arc<Galley>,
 
     /// Add this underline to the whole text.
     /// You can also set an underline when creating the galley.
@@ -553,7 +587,7 @@ pub struct TextShape {
 
 impl TextShape {
     #[inline]
-    pub fn new(pos: Pos2, galley: crate::mutex::Arc<Galley>) -> Self {
+    pub fn new(pos: Pos2, galley: Arc<Galley>) -> Self {
         Self {
             pos,
             galley,
@@ -645,7 +679,15 @@ fn dashes_from_line(
 /// Information passed along with [`PaintCallback`] ([`Shape::Callback`]).
 pub struct PaintCallbackInfo {
     /// Viewport in points.
-    pub rect: Rect,
+    ///
+    /// This specifies where on the screen to paint, and the borders of this
+    /// Rect is the [-1, +1] of the Normalized Device Coordinates.
+    ///
+    /// Note than only a portion of this may be visible due to [`Self::clip_rect`].
+    pub viewport: Rect,
+
+    /// Clip rectangle in points.
+    pub clip_rect: Rect,
 
     /// Pixels per point.
     pub pixels_per_point: f32,
@@ -654,37 +696,44 @@ pub struct PaintCallbackInfo {
     pub screen_size_px: [u32; 2],
 }
 
-impl PaintCallbackInfo {
+pub struct ViewportInPixels {
     /// Physical pixel offset for left side of the viewport.
-    #[inline]
-    pub fn viewport_left_px(&self) -> f32 {
-        self.rect.min.x * self.pixels_per_point
-    }
+    pub left_px: f32,
 
     /// Physical pixel offset for top side of the viewport.
-    #[inline]
-    pub fn viewport_top_px(&self) -> f32 {
-        self.rect.min.y * self.pixels_per_point
-    }
+    pub top_px: f32,
 
     /// Physical pixel offset for bottom side of the viewport.
     ///
-    /// This is what `glViewport` etc expects for the y axis.
-    #[inline]
-    pub fn viewport_from_bottom_px(&self) -> f32 {
-        self.screen_size_px[1] as f32 - self.rect.max.y * self.pixels_per_point
-    }
+    /// This is what `glViewport`, `glScissor` etc expects for the y axis.
+    pub from_bottom_px: f32,
 
     /// Viewport width in physical pixels.
-    #[inline]
-    pub fn viewport_width_px(&self) -> f32 {
-        self.rect.width() * self.pixels_per_point
-    }
+    pub width_px: f32,
 
     /// Viewport width in physical pixels.
-    #[inline]
-    pub fn viewport_height_px(&self) -> f32 {
-        self.rect.height() * self.pixels_per_point
+    pub height_px: f32,
+}
+
+impl PaintCallbackInfo {
+    fn points_to_pixels(&self, rect: &Rect) -> ViewportInPixels {
+        ViewportInPixels {
+            left_px: rect.min.x * self.pixels_per_point,
+            top_px: rect.min.y * self.pixels_per_point,
+            from_bottom_px: self.screen_size_px[1] as f32 - rect.max.y * self.pixels_per_point,
+            width_px: rect.width() * self.pixels_per_point,
+            height_px: rect.height() * self.pixels_per_point,
+        }
+    }
+
+    /// The viewport rectangle. This is what you would use in e.g. `glViewport`.
+    pub fn viewport_in_pixels(&self) -> ViewportInPixels {
+        self.points_to_pixels(&self.viewport)
+    }
+
+    /// The "scissor" or "clip" rectangle. This is what you would use in e.g. `glScissor`.
+    pub fn clip_rect_in_pixels(&self) -> ViewportInPixels {
+        self.points_to_pixels(&self.clip_rect)
     }
 }
 
@@ -705,12 +754,12 @@ pub struct PaintCallback {
     ///
     /// The rendering backend is also responsible for restoring any state,
     /// such as the bound shader program and vertex array.
-    pub callback: std::sync::Arc<dyn Fn(&PaintCallbackInfo, &dyn std::any::Any) + Send + Sync>,
+    pub callback: Arc<dyn Fn(&PaintCallbackInfo, &mut dyn std::any::Any) + Send + Sync>,
 }
 
 impl PaintCallback {
     #[inline]
-    pub fn call(&self, info: &PaintCallbackInfo, render_ctx: &dyn std::any::Any) {
+    pub fn call(&self, info: &PaintCallbackInfo, render_ctx: &mut dyn std::any::Any) {
         (self.callback)(info, render_ctx);
     }
 }
@@ -729,7 +778,7 @@ impl std::cmp::PartialEq for PaintCallback {
         // can only happen if we do dynamic casts back and forth on the pointers, and we don't do that.
         #[allow(clippy::vtable_address_comparisons)]
         {
-            self.rect.eq(&other.rect) && std::sync::Arc::ptr_eq(&self.callback, &other.callback)
+            self.rect.eq(&other.rect) && Arc::ptr_eq(&self.callback, &other.callback)
         }
     }
 }

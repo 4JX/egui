@@ -20,7 +20,8 @@ use super::{
     Sense, TextStyle, Ui, Vec2,
 };
 use crate::{widgets::*, *};
-use epaint::{mutex::Arc, mutex::RwLock, Stroke};
+use epaint::{mutex::RwLock, Stroke};
+use std::sync::Arc;
 
 /// What is saved between frames.
 #[derive(Clone, Default)]
@@ -213,7 +214,7 @@ impl MenuRootManager {
     ) -> Option<InnerResponse<R>> {
         if let Some(root) = self.inner.as_mut() {
             let (menu_response, inner_response) = root.show(response, add_contents);
-            if let MenuResponse::Close = menu_response {
+            if MenuResponse::Close == menu_response {
                 self.inner = None;
             }
             inner_response

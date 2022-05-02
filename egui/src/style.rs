@@ -3,7 +3,7 @@
 #![allow(clippy::if_same_then_else)]
 
 use crate::{color::*, emath::*, FontFamily, FontId, Response, RichText, WidgetText};
-use epaint::{mutex::Arc, Rounding, Shadow, Stroke};
+use epaint::{Rounding, Shadow, Stroke};
 use std::collections::BTreeMap;
 
 // ----------------------------------------------------------------------------
@@ -35,7 +35,7 @@ pub enum TextStyle {
     /// ```
     /// egui::TextStyle::Name("footing".into());
     /// ````
-    Name(Arc<str>),
+    Name(std::sync::Arc<str>),
 }
 
 impl std::fmt::Display for TextStyle {
@@ -145,6 +145,32 @@ pub struct Style {
     /// The [`FontFamily`] and size you want to use for a specific [`TextStyle`].
     ///
     /// The most convenient way to look something up in this is to use [`TextStyle::resolve`].
+    ///
+    /// If you would like to overwrite app text_styles
+    ///
+    /// ```
+    /// # let mut ctx = egui::Context::default();
+    /// use egui::FontFamily::Proportional;
+    /// use egui::FontId;
+    /// use egui::TextStyle::*;
+    ///
+    /// // Get current context style
+    /// let mut style = (*ctx.style()).clone();
+    ///
+    /// // Redefine text_styles
+    /// style.text_styles = [
+    ///   (Heading, FontId::new(30.0, Proportional)),
+    ///   (Name("Heading2".into()), FontId::new(25.0, Proportional)),
+    ///   (Name("Context".into()), FontId::new(23.0, Proportional)),
+    ///   (Body, FontId::new(18.0, Proportional)),
+    ///   (Monospace, FontId::new(14.0, Proportional)),
+    ///   (Button, FontId::new(14.0, Proportional)),
+    ///   (Small, FontId::new(10.0, Proportional)),
+    /// ].into();
+    ///
+    /// // Mutate global style with above changes
+    /// ctx.set_style(style);
+    /// ```
     pub text_styles: BTreeMap<TextStyle, FontId>,
 
     /// If set, labels buttons wtc will use this to determine whether or not
@@ -241,8 +267,12 @@ pub struct Spacing {
     pub text_edit_width: f32,
 
     /// Checkboxes, radio button and collapsing headers have an icon at the start.
-    /// This is the width/height of this icon.
+    /// This is the width/height of the outer part of this icon (e.g. the BOX of the checkbox).
     pub icon_width: f32,
+
+    /// Checkboxes, radio button and collapsing headers have an icon at the start.
+    /// This is the width/height of the inner part of this icon (e.g. the check of the checkbox).
+    pub icon_width_inner: f32,
 
     /// Checkboxes, radio button and collapsing headers have an icon at the start.
     /// This is the spacing between the icon and the text
@@ -263,15 +293,14 @@ pub struct Spacing {
 impl Spacing {
     /// Returns small icon rectangle and big icon rectangle
     pub fn icon_rectangles(&self, rect: Rect) -> (Rect, Rect) {
-        let box_side = self.icon_width;
+        let icon_width = self.icon_width;
         let big_icon_rect = Rect::from_center_size(
-            pos2(rect.left() + box_side / 2.0, rect.center().y),
-            vec2(box_side, box_side),
+            pos2(rect.left() + icon_width / 2.0, rect.center().y),
+            vec2(icon_width, icon_width),
         );
 
-        let small_rect_side = 8.0; // TODO: make a parameter
         let small_icon_rect =
-            Rect::from_center_size(big_icon_rect.center(), Vec2::splat(small_rect_side));
+            Rect::from_center_size(big_icon_rect.center(), Vec2::splat(self.icon_width_inner));
 
         (small_icon_rect, big_icon_rect)
     }
@@ -608,7 +637,8 @@ impl Default for Spacing {
             slider_width: 100.0,
             text_edit_width: 280.0,
             icon_width: 14.0,
-            icon_spacing: 0.0,
+            icon_width_inner: 8.0,
+            icon_spacing: 4.0,
             tooltip_width: 600.0,
             combo_height: 200.0,
             scroll_bar_width: 8.0,
@@ -883,6 +913,7 @@ impl Spacing {
             slider_width,
             text_edit_width,
             icon_width,
+            icon_width_inner,
             icon_spacing,
             tooltip_width,
             indent_ends_with_horizontal_line,
@@ -946,7 +977,12 @@ impl Spacing {
             ui.label("Checkboxes etc:");
             ui.add(
                 DragValue::new(icon_width)
-                    .prefix("width:")
+                    .prefix("outer icon width:")
+                    .clamp_range(0.0..=60.0),
+            );
+            ui.add(
+                DragValue::new(icon_width_inner)
+                    .prefix("inner icon width:")
                     .clamp_range(0.0..=60.0),
             );
             ui.add(

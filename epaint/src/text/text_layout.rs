@@ -1,7 +1,8 @@
 use std::ops::RangeInclusive;
+use std::sync::Arc;
 
 use super::{FontsImpl, Galley, Glyph, LayoutJob, LayoutSection, Row, RowVisuals};
-use crate::{mutex::Arc, Color32, Mesh, Stroke, Vertex};
+use crate::{Color32, Mesh, Stroke, Vertex};
 use emath::*;
 
 // ----------------------------------------------------------------------------
@@ -194,8 +195,8 @@ fn line_break(
     let mut row_start_idx = 0;
     let mut non_empty_rows = 0;
 
-    for (i, glyph) in paragraph.glyphs.iter().enumerate() {
-        let potential_row_width = glyph.max_x() - row_start_x;
+    for i in 0..paragraph.glyphs.len() {
+        let potential_row_width = paragraph.glyphs[i].max_x() - row_start_x;
 
         if job.wrap.max_rows > 0 && non_empty_rows >= job.wrap.max_rows {
             break;
@@ -245,12 +246,14 @@ fn line_break(
             }
         }
 
-        row_break_candidates.add(i, glyph.chr);
+        row_break_candidates.add(i, &paragraph.glyphs[i..]);
     }
 
     if row_start_idx < paragraph.glyphs.len() {
-        if non_empty_rows == job.wrap.max_rows {
-            replace_last_glyph_with_overflow_character(fonts, job, out_rows);
+        if job.wrap.max_rows > 0 && non_empty_rows == job.wrap.max_rows {
+            if let Some(last_row) = out_rows.last_mut() {
+                replace_last_glyph_with_overflow_character(fonts, job, last_row);
+            }
         } else {
             let glyphs: Vec<Glyph> = paragraph.glyphs[row_start_idx..]
                 .iter()
@@ -277,15 +280,10 @@ fn line_break(
 fn replace_last_glyph_with_overflow_character(
     fonts: &mut FontsImpl,
     job: &LayoutJob,
-    out_rows: &mut Vec<Row>,
+    row: &mut Row,
 ) {
     let overflow_character = match job.wrap.overflow_character {
         Some(c) => c,
-        None => return,
-    };
-
-    let row = match out_rows.last_mut() {
-        Some(r) => r,
         None => return,
     };
 
@@ -719,6 +717,8 @@ struct RowBreakCandidates {
     space: Option<usize>,
     /// Logograms (single character representing a whole word) are good candidates for line break.
     logogram: Option<usize>,
+    /// Kana (Japanese hiragana and katakana) may be line broken unless before a gyōtō kinsoku character.
+    kana: Option<usize>,
     /// Breaking at a dash is a super-
     /// good idea.
     dash: Option<usize>,
@@ -731,16 +731,19 @@ struct RowBreakCandidates {
 }
 
 impl RowBreakCandidates {
-    fn add(&mut self, index: usize, chr: char) {
+    fn add(&mut self, index: usize, glyphs: &[Glyph]) {
+        let chr = glyphs[0].chr;
         const NON_BREAKING_SPACE: char = '\u{A0}';
         if chr.is_whitespace() && chr != NON_BREAKING_SPACE {
             self.space = Some(index);
-        } else if is_chinese(chr) {
+        } else if is_cjk_ideograph(chr) {
             self.logogram = Some(index);
         } else if chr == '-' {
             self.dash = Some(index);
         } else if chr.is_ascii_punctuation() {
             self.punctuation = Some(index);
+        } else if is_kana(chr) && (glyphs.len() == 1 || !is_gyoto_kinsoku(glyphs[1].chr)) {
+            self.kana = Some(index);
         }
         self.any = Some(index);
     }
@@ -762,6 +765,7 @@ impl RowBreakCandidates {
             self.any
         } else {
             self.space
+                .or(self.kana)
                 .or(self.logogram)
                 .or(self.dash)
                 .or(self.punctuation)
@@ -771,8 +775,32 @@ impl RowBreakCandidates {
 }
 
 #[inline]
-fn is_chinese(c: char) -> bool {
+fn is_cjk_ideograph(c: char) -> bool {
     ('\u{4E00}' <= c && c <= '\u{9FFF}')
         || ('\u{3400}' <= c && c <= '\u{4DBF}')
         || ('\u{2B740}' <= c && c <= '\u{2B81F}')
+}
+
+#[inline]
+fn is_kana(c: char) -> bool {
+    ('\u{3040}' <= c && c <= '\u{309F}') // Hiragana block
+        || ('\u{30A0}' <= c && c <= '\u{30FF}') // Katakana block
+}
+
+#[inline]
+fn is_gyoto_kinsoku(c: char) -> bool {
+    // Gyōtō (meaning "beginning of line") kinsoku characters in Japanese typesetting are characters that may not appear at the start of a line, according to kinsoku shori rules.
+    // The list of gyōtō kinsoku characters can be found at https://en.wikipedia.org/wiki/Line_breaking_rules_in_East_Asian_languages#Characters_not_permitted_on_the_start_of_a_line.
+    ")]｝〕〉》」』】〙〗〟'\"｠»ヽヾーァィゥェォッャュョヮヵヶぁぃぅぇぉっゃゅょゎゕゖㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ々〻‐゠–〜?!‼⁇⁈⁉・、:;,。.".contains(c)
+}
+
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_zero_max_width() {
+    let mut fonts = FontsImpl::new(1.0, 1024, super::FontDefinitions::default());
+    let mut layout_job = LayoutJob::single_section("W".into(), super::TextFormat::default());
+    layout_job.wrap.max_width = 0.0;
+    let galley = super::layout(&mut fonts, layout_job.into());
+    assert_eq!(galley.rows.len(), 1);
 }

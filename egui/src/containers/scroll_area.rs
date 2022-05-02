@@ -74,6 +74,8 @@ pub struct ScrollAreaOutput<R> {
 /// });
 /// # });
 /// ```
+///
+/// You can scroll to an element using [`Response::scroll_to_me`], [`Ui::scroll_to_cursor`] and [`Ui::scroll_to_rect`].
 #[derive(Clone, Debug)]
 #[must_use = "You should call .show()"]
 pub struct ScrollArea {
@@ -325,6 +327,11 @@ impl ScrollArea {
 
         let id_source = id_source.unwrap_or_else(|| Id::new("scroll_area"));
         let id = ui.make_persistent_id(id_source);
+        ui.ctx().check_for_id_clash(
+            id,
+            Rect::from_min_size(ui.available_rect_before_wrap().min, Vec2::ZERO),
+            "ScrollArea",
+        );
         let mut state = State::load(&ctx, id).unwrap_or_default();
 
         state.offset.x = offset_x.unwrap_or(state.offset.x);
@@ -453,9 +460,7 @@ impl ScrollArea {
         self.show_viewport(ui, |ui, viewport| {
             ui.set_height((row_height_with_spacing * total_rows as f32 - spacing.y).at_least(0.0));
 
-            let min_row = (viewport.min.y / row_height_with_spacing)
-                .floor()
-                .at_least(0.0) as usize;
+            let min_row = (viewport.min.y / row_height_with_spacing).floor() as usize;
             let max_row = (viewport.max.y / row_height_with_spacing).ceil() as usize + 1;
             let max_row = max_row.at_most(total_rows);
 
