@@ -1,4 +1,8 @@
-use crate::Color32;
+use std::vec;
+
+use emath::{Rect, Pos2, Vec2};
+
+use crate::{Color32, Rounding};
 
 /// An image stored in RAM.
 ///
@@ -53,10 +57,12 @@ pub struct ColorImage {
 
 impl ColorImage {
     /// Create an image filled with the given color.
-    pub fn new(size: [usize; 2], color: Color32) -> Self {
+    pub fn new(size: [usize; 2], color: Color32, rounding: Rounding ) -> Self {
+        let mut pixels =  vec![color; size[0] * size[1]];
+        apply_rounding(size, &mut pixels, rounding);
         Self {
             size,
-            pixels: vec![color; size[0] * size[1]],
+            pixels,
         }
     }
 
@@ -90,12 +96,13 @@ impl ColorImage {
     ///     ))
     /// }
     /// ```
-    pub fn from_rgba_unmultiplied(size: [usize; 2], rgba: &[u8]) -> Self {
+    pub fn from_rgba_unmultiplied(size: [usize; 2], rgba: &[u8], rounding: Rounding) -> Self {
         assert_eq!(size[0] * size[1] * 4, rgba.len());
-        let pixels = rgba
+        let mut pixels: Vec<Color32> = rgba
             .chunks_exact(4)
             .map(|p| Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]))
             .collect();
+        apply_rounding(size, &mut pixels, rounding);
         Self { size, pixels }
     }
 
@@ -103,7 +110,7 @@ impl ColorImage {
     pub fn example() -> Self {
         let width = 128;
         let height = 64;
-        let mut img = Self::new([width, height], Color32::TRANSPARENT);
+        let mut img = Self::new([width, height], Color32::TRANSPARENT, Rounding::none());
         for y in 0..height {
             for x in 0..width {
                 let h = x as f32 / width as f32;
@@ -125,6 +132,40 @@ impl ColorImage {
     pub fn height(&self) -> usize {
         self.size[1]
     }
+}
+
+fn apply_rounding(size: [usize;2], rgba: &mut [Color32], rounding: Rounding) {
+    if rounding == Rounding::none() {
+        return
+    }
+
+    let ro = clamp_radius(rounding, size);
+
+    cut_image_corner(rgba, size[0], Pos2::new( ro.nw, ro.nw ), Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(ro.nw, ro.nw))   , ro.nw);
+    cut_image_corner(rgba, size[0], Pos2::new( size[0] as f32 - ro.ne,  ro.ne ), Rect::from_min_size(Pos2::new(size[0] as f32 - ro.ne, 0.0), Vec2::new(ro.ne, ro.ne))   , ro.ne);
+    cut_image_corner(rgba, size[0], Pos2::new( ro.sw, size[1] as f32 - ro.sw ), Rect::from_min_size(Pos2::new(0.0, size[1] as f32 - ro.sw), Vec2::new(ro.sw, ro.sw))   , ro.sw);
+    cut_image_corner(rgba, size[0], Pos2::new( size[0] as f32 - ro.se, size[1] as f32 - ro.se ), Rect::from_min_size(Pos2::new(size[0] as f32 - ro.se, size[1] as f32 - ro.se), Vec2::new(ro.se, ro.se))   , ro.se);
+
+}
+
+fn cut_image_corner(rgba: &mut [Color32], image_width: usize, radius_center_pos: Pos2, cutout_rect: Rect, max_len: f32) {
+    for y in cutout_rect.min.y as usize..cutout_rect.max.y as usize {
+        for x in cutout_rect.min.x as usize..cutout_rect.max.x as usize {
+            let pixel_pos = Pos2::new(x as f32, y as f32);
+            let vec2 = radius_center_pos - pixel_pos;
+            if vec2.length() > max_len as f32 {
+                rgba[((y * image_width) + x) as usize] = Color32::RED;
+            }
+        }
+    }
+}
+
+// Ensures the radius of each corner is within a valid range
+fn clamp_radius(rounding: Rounding, size: [usize; 2]) -> Rounding {
+    let half_width = size[0] as f32 * 0.5;
+    let half_height = size[1] as f32 * 0.5;
+    let max_cr = half_width.min(half_height);
+    rounding.at_most(max_cr).at_least(0.0)
 }
 
 impl std::ops::Index<(usize, usize)> for ColorImage {

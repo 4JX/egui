@@ -131,6 +131,8 @@ use egui::ColorImage;
 /// On invalid image or unsupported image format.
 #[cfg(feature = "image")]
 pub fn load_image_bytes(image_bytes: &[u8]) -> Result<egui::ColorImage, String> {
+    use egui::Rounding;
+
     let image = image::load_from_memory(image_bytes).map_err(|err| err.to_string())?;
     let size = [image.width() as _, image.height() as _];
     let image_buffer = image.to_rgba8();
@@ -138,6 +140,7 @@ pub fn load_image_bytes(image_bytes: &[u8]) -> Result<egui::ColorImage, String> 
     Ok(egui::ColorImage::from_rgba_unmultiplied(
         size,
         pixels.as_slice(),
+        Rounding::none()
     ))
 }
 
@@ -149,6 +152,8 @@ pub fn load_image_bytes(image_bytes: &[u8]) -> Result<egui::ColorImage, String> 
 /// On invalid image
 #[cfg(feature = "svg")]
 pub fn load_svg_bytes(svg_bytes: &[u8]) -> Result<egui::ColorImage, String> {
+    use egui::Rounding;
+
     let mut opt = usvg::Options::default();
     opt.fontdb.load_system_fonts();
 
@@ -171,6 +176,7 @@ pub fn load_svg_bytes(svg_bytes: &[u8]) -> Result<egui::ColorImage, String> {
     let image = egui::ColorImage::from_rgba_unmultiplied(
         [pixmap.width() as _, pixmap.height() as _],
         pixmap.data(),
+        Rounding::none()
     );
 
     Ok(image)
