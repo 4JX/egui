@@ -18,6 +18,7 @@ pub(crate) struct InnerState {
 pub enum CollapserPosition {
     Before,
     After,
+    Invisible,
 }
 
 /// This is a a building block for building collapsing regions.
@@ -195,14 +196,18 @@ impl CollapsingState {
                     let collapser = self.show_default_button_indented(ui);
                     ui.spacing_mut().item_spacing.x = ui.spacing_mut().icon_spacing; // Restore spacing
                     let add_header_ret = add_header(ui);
-                    (collapser, add_header_ret)
+                    (Some(collapser), add_header_ret)
                 }
                 CollapserPosition::After => {
                     let add_header_ret = add_header(ui);
                     ui.spacing_mut().item_spacing.x = 0.0; // the toggler button uses the full indent width
                     let collapser = self.show_default_button_indented(ui);
                     ui.spacing_mut().item_spacing.x = ui.spacing_mut().icon_spacing; // Restore spacing
-                    (collapser, add_header_ret)
+                    (Some(collapser), add_header_ret)
+                }
+                CollapserPosition::Invisible => {
+                    let add_header_ret = add_header(ui);
+                    (None, add_header_ret)
                 }
             }
         });
@@ -291,7 +296,7 @@ impl CollapsingState {
 pub struct HeaderResponse<'ui, HeaderRet> {
     state: CollapsingState,
     ui: &'ui mut Ui,
-    toggle_button_response: Response,
+    toggle_button_response: Option<Response>,
     header_response: InnerResponse<HeaderRet>,
 }
 
@@ -301,7 +306,7 @@ impl<'ui, HeaderRet> HeaderResponse<'ui, HeaderRet> {
         mut self,
         add_body: impl FnOnce(&mut Ui) -> BodyRet,
     ) -> (
-        Response,
+        Option<Response>,
         InnerResponse<HeaderRet>,
         Option<InnerResponse<BodyRet>>,
     ) {
