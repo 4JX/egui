@@ -375,7 +375,7 @@ impl Context {
             for pointer_event in &input.pointer.pointer_events {
                 match pointer_event {
                     PointerEvent::Moved(_) => {}
-                    PointerEvent::Pressed(_) => {
+                    PointerEvent::Pressed { .. } => {
                         if hovered {
                             if sense.click && memory.interaction.click_id.is_none() {
                                 // potential start of a click
@@ -830,14 +830,17 @@ impl Context {
 
         let pixels_per_point = self.pixels_per_point();
         let tessellation_options = *self.tessellation_options();
-        let font_image_size = self.fonts().font_image_size();
+        let texture_atlas = self.fonts().texture_atlas();
+        let font_tex_size = texture_atlas.lock().size();
+        let prepared_discs = texture_atlas.lock().prepared_discs();
 
         let paint_stats = PaintStats::from_shapes(&shapes);
         let clipped_primitives = tessellator::tessellate_shapes(
             pixels_per_point,
             tessellation_options,
+            font_tex_size,
+            prepared_discs,
             shapes,
-            font_image_size,
         );
         self.write().paint_stats = paint_stats.with_clipped_primitives(&clipped_primitives);
         clipped_primitives
